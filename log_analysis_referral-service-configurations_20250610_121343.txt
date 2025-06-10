@@ -1,4 +1,0 @@
-Log Analysis for referral-service-configurations (1h) - 2025-06-10 12:13:43
-
-Error analyzing logs with Claude: Parameter validation failed:
-Unknown parameter in input: "inferenceProfile", must be one of: body, contentType, accept, modelId, trace, guardrailIdentifier, guardrailVersion, performanceConfigLatency

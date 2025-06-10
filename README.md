@@ -20,6 +20,7 @@ Log Explorer is a Python-based CLI tool that helps on-call engineers quickly ana
 - **Powerful Filtering**: Filter by application, time range, log level, and message content
 - **Concise Summaries**: Get actionable insights quickly during critical incidents
 - **AWS Bedrock Integration**: Uses AWS Bedrock for secure AI inference
+- **Organized Output**: All analysis reports are saved in the `log_analysis/` directory
 
 ## Quick Start
 

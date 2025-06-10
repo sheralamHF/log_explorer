@@ -35,10 +35,24 @@ Before using the Log Explorer tool, ensure you have the following:
 
 ## Configuration
 
-The Log Explorer tool is configured via command-line arguments. The main configuration options include:
+The Log Explorer tool can be configured via command-line arguments or environment variables. The main configuration options include:
 
-- AWS Region (default: eu-west-1)
-- AWS Bedrock Inference Profile ARN (default is provided in the script)
+### Environment Variables
+
+For AWS authentication and configuration, you can set these environment variables:
+
+- `AWS_REGION`: The AWS region to use (e.g., "eu-west-1")
+- `AWS_BEDROCK_INFERENCE_PROFILE`: The ARN of your Bedrock inference profile
+- `AWS_ACCESS_KEY_ID`: Your AWS access key ID
+- `AWS_SECRET_ACCESS_KEY`: Your AWS secret access key
+- `AWS_SESSION_TOKEN`: Your AWS session token (if using temporary credentials)
+
+### Command-Line Arguments
+
+Command-line arguments will override environment variables if both are provided:
+
+- AWS Region (defaults to AWS_REGION environment variable or "eu-west-1")
+- AWS Bedrock Inference Profile ARN (defaults to AWS_BEDROCK_INFERENCE_PROFILE environment variable)
 - Log source (Kubernetes or Prometheus)
 
 No additional configuration files are required as the tool uses existing Kubernetes and AWS configurations from your environment.
@@ -87,6 +101,20 @@ This wrapper script automatically activates the virtual environment before runni
 ./run_log_explorer.sh --app inventory-service --source prometheus --time-range 1d
 ```
 
+### Using Environment Variables for AWS Credentials
+
+```bash
+# Set environment variables
+export AWS_REGION=eu-west-1
+export AWS_BEDROCK_INFERENCE_PROFILE=arn:aws:bedrock:eu-west-1:123456789012:inference-profile/my-profile
+export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+export AWS_SESSION_TOKEN=AQoDYXdzEJr...EXAMPLETOKEN
+
+# Run the tool (no need to specify region or profile)
+./run_log_explorer.sh --app payment-service --log-type error
+```
+
 ## Understanding the Output
 
 The tool provides a comprehensive analysis of the logs, organized into several sections:
@@ -98,7 +126,7 @@ The tool provides a comprehensive analysis of the logs, organized into several s
 5. **Investigation Areas**: Specific code or systems to look into
 6. **Related Trace IDs**: Trace IDs that might help with debugging
 
-The analysis is displayed in the terminal and also saved to a timestamped file in the current directory.
+The analysis is displayed in the terminal and also saved to a timestamped file in the `log_analysis/` directory.
 
 ## Troubleshooting
 
@@ -107,7 +135,9 @@ The analysis is displayed in the terminal and also saved to a timestamped file i
 1. **AWS Bedrock Access Error**:
    - Ensure your AWS credentials are properly configured
    - Verify you have access to the Bedrock service
-   - Check the inference profile ARN is correct
+   - Note: The tool now automatically tests the Bedrock connection on startup
+   - If the "inferenceProfile" parameter causes errors, it will automatically skip it
+   - To troubleshoot further, check the AWS policy associated with your credentials to ensure it has bedrock:ListFoundationModels and bedrock-runtime:InvokeModel permissions
 
 2. **Kubernetes Access Error**:
    - Check your kubeconfig file is properly configured

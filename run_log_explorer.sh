@@ -104,6 +104,19 @@ parse_and_run() {
     
     # Run the script with all arguments
     echo "Running Log Explorer..."
+    
+    # Print a message if AWS environment variables are detected
+    if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+        echo "AWS credentials detected in environment."
+    fi
+    if [ -n "$AWS_BEDROCK_INFERENCE_PROFILE" ]; then
+        echo "Using AWS Bedrock inference profile from environment: $AWS_BEDROCK_INFERENCE_PROFILE"
+    fi
+    if [ -n "$AWS_REGION" ]; then
+        echo "Using AWS region from environment: $AWS_REGION"
+    fi
+    
+    # Pass all environment variables to the Python process
     eval "python ${LOG_EXPLORER_SCRIPT} ${ARGS}"
 }
 

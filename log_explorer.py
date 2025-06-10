@@ -24,15 +24,196 @@ from kubernetes.client.rest import ApiException
 
 
 class LogExplorer:
-    def __init__(self, region="eu-west-1", profile_arn=None, disable_ssl_verify=False):
+    def __init__(self, region=None, profile_arn=None, disable_ssl_verify=False):
         """Initialize the LogExplorer with AWS Bedrock client."""
-        self.region = region
-        self.profile_arn = profile_arn or "arn:aws:bedrock:eu-west-1:951719175506:inference-profile/eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
+        # Use environment variables if available, otherwise use defaults
+        self.region = region or os.environ.get("AWS_REGION", "eu-west-1")
+        self.profile_arn = profile_arn or os.environ.get("AWS_BEDROCK_INFERENCE_PROFILE", 
+            "arn:aws:bedrock:eu-west-1:951719175506:inference-profile/eu.anthropic.claude-3-7-sonnet-20250219-v1:0")
         self.disable_ssl_verify = disable_ssl_verify
-        self.bedrock_client = boto3.client(
-            service_name="bedrock-runtime", 
-            region_name=self.region
-        )
+        
+        # Set the Claude model ID
+        self.model_id = "eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
+        
+        # Create the Bedrock client using environment credentials when available
+        try:
+            session = boto3.Session(region_name=self.region)
+            self.bedrock_client = session.client("bedrock-runtime")
+            print(f"Successfully initialized Bedrock client in region: {self.region}")
+        except Exception as e:
+            print(f"Warning: Error initializing standard Bedrock client: {str(e)}")
+            print("Falling back to direct boto3 client...")
+            self.bedrock_client = boto3.client(
+                service_name="bedrock-runtime", 
+                region_name=self.region
+            )
+        
+        # Test the AWS Bedrock connection
+        self.test_bedrock_connection()
+        
+    def test_bedrock_connection(self):
+        """Test the connection to AWS Bedrock and list available models."""
+        try:
+            print("\n=== Testing AWS Bedrock Connection ===")
+            print(f"Using Claude model ID: {self.model_id}")
+            print(f"Using inference profile: {self.profile_arn}")
+            
+            # Try direct API call to test connection
+            try:
+                print("\nTesting Claude API access...")
+                
+                # Create modified invoke parameters
+                invoke_params = {
+                    "body": json.dumps({
+                        "anthropic_version": "bedrock-2023-05-31",
+                        "max_tokens": 10,
+                        "messages": [{"role": "user", "content": "Say hello"}]
+                    }),
+                    "contentType": "application/json",
+                    "accept": "application/json"
+                }
+                
+                # Try direct Claude API call
+                from botocore.exceptions import ClientError
+                
+                # First, try using the modelId parameter
+                try:
+                    print("Testing standard modelId parameter...")
+                    response = self.bedrock_client.invoke_model(
+                        modelId=self.model_id,
+                        **invoke_params
+                    )
+                    # If successful, keep using standard method
+                    print("✓ Standard modelId parameter worked!")
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', '')
+                    error_msg = e.response.get('Error', {}).get('Message', '')
+                    
+                    if "ResourceNotFoundException" in str(e) or "not found" in str(e).lower():
+                        print(f"✗ Model ID not recognized: {error_msg}")
+                        print("Trying alternative approach with direct API call...")
+                        
+                        try:
+                            # Try calling the model directly by endpoint
+                            endpoint = f"bedrock-runtime.{self.region}.amazonaws.com"
+                            path = f"/model/{self.model_id}/invoke"
+                            
+                            print(f"Custom approach would use: {endpoint}{path}")
+                            print("However, for compatibility we're going to use standard models.")
+                            print("Try one of these standard Claude models:")
+                            std_models = [
+                                "anthropic.claude-3-sonnet-20240229-v1:0",
+                                "anthropic.claude-3-haiku-20240307-v1:0",
+                                "anthropic.claude-v2",
+                                "anthropic.claude-v2:1",
+                                "anthropic.claude-instant-v1"
+                            ]
+                            
+                            for idx, model in enumerate(std_models):
+                                print(f"  {idx+1}. {model}")
+                            
+                            # Try the first standard model
+                            print(f"\nTrying with standard model: {std_models[0]}...")
+                            self.model_id = std_models[0]
+                            response = self.bedrock_client.invoke_model(
+                                modelId=self.model_id,
+                                **invoke_params
+                            )
+                            print("✓ Standard model worked successfully!")
+                        except Exception as inner_e:
+                            print(f"✗ Alternative approach failed: {str(inner_e)}")
+                            print("Check your AWS credentials and Bedrock access permissions.")
+                            return
+                    else:
+                        print(f"✗ Unexpected error: {error_code} - {error_msg}")
+                        return
+                
+                # Check if response is valid
+                response_body = json.loads(response['body'].read().decode())
+                if 'content' in response_body and len(response_body['content']) > 0:
+                    print("✓ AWS Bedrock connection test successful!")
+                    print(f"Response: {response_body['content'][0]['text'][:50]}...")
+                else:
+                    print(f"⚠ Unexpected response format: {response_body}")
+            except Exception as e:
+                print(f"✗ Test invocation failed: {str(e)}")
+                print("Check your AWS credentials and Bedrock access permissions.")
+                
+            print("=====================================\n")
+        except Exception as e:
+            print(f"✗ AWS Bedrock connection test failed: {str(e)}")
+            print("Will continue but analysis functionality may not work properly.")
+    
+    def custom_bedrock_invoke(self, prompt, max_tokens=4096):
+        """
+        Custom method to invoke AWS Bedrock Claude models using requests directly.
+        This is a fallback for when boto3 doesn't support the desired model ID.
+        
+        Args:
+            prompt: The prompt to send to Claude
+            max_tokens: Maximum number of tokens in the response
+            
+        Returns:
+            The analysis text from Claude
+        """
+        try:
+            print("\nAttempting custom AWS Bedrock API call...")
+            
+            # Try to use requests library for direct API call
+            import requests
+            from requests_aws4auth import AWS4Auth
+            
+            # Get AWS credentials from boto3
+            session = boto3.Session(region_name=self.region)
+            credentials = session.get_credentials()
+            
+            # Create the auth handler
+            auth = AWS4Auth(
+                credentials.access_key,
+                credentials.secret_key,
+                self.region,
+                'bedrock',
+                session_token=credentials.token
+            )
+            
+            # Prepare the request URL and headers
+            url = f"https://bedrock-runtime.{self.region}.amazonaws.com/model/{self.model_id}/invoke"
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+            
+            # Prepare the request body
+            body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": max_tokens,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            }
+            
+            # Send the request
+            print(f"Sending request to: {url}")
+            response = requests.post(url, auth=auth, headers=headers, json=body)
+            
+            # Check the response
+            if response.status_code == 200:
+                result = response.json()
+                if 'content' in result and len(result['content']) > 0:
+                    return result['content'][0]['text']
+                else:
+                    return f"Unexpected response format: {result}"
+            else:
+                return f"API call failed with status code {response.status_code}: {response.text}"
+                
+        except ImportError:
+            print("requests_aws4auth not installed. Try: pip install requests-aws4auth")
+            return "Error: Required Python packages not installed for custom API call."
+        except Exception as e:
+            return f"Custom API call failed: {str(e)}"
         
     def fetch_logs_from_kubernetes(self, 
                                   app_name: str, 
@@ -491,12 +672,13 @@ class LogExplorer:
         
         # Call Claude via AWS Bedrock
         try:
-            response = self.bedrock_client.invoke_model(
-                modelId="anthropic.claude-3-sonnet-20240229-v1:0",  # Using Claude 3.7 Sonnet
-                inferenceProfile=self.profile_arn,
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps({
+            # Set up the invoke arguments using the model_id that was identified during initialization
+            print(f"Analyzing logs with model: {self.model_id}")
+            invoke_args = {
+                "modelId": self.model_id,  # Using the tested Claude model
+                "contentType": "application/json",
+                "accept": "application/json",
+                "body": json.dumps({
                     "anthropic_version": "bedrock-2023-05-31",
                     "max_tokens": 4096,
                     "messages": [
@@ -506,14 +688,112 @@ class LogExplorer:
                         }
                     ]
                 })
-            )
+            }
             
-            # Parse and return response
-            response_body = json.loads(response['body'].read().decode())
-            return response_body['content'][0]['text']
+            # Check if we should try to use inference profile
+            if self.profile_arn:
+                print(f"Using Bedrock inference profile: {self.profile_arn}")
+                # Since boto3 doesn't support inference profiles directly, we can try using it
+                # but be prepared for it to fail
+                try:
+                    # Add inference profile if available
+                    invoke_args["inferenceProfile"] = self.profile_arn
+                except Exception as e:
+                    print(f"Warning: Could not use inference profile: {str(e)}")
+                    print("Continuing without inference profile...")
+            
+            try:
+                # Try the standard boto3 invoke method first
+                print("Attempting standard boto3 invoke_model...")
+                response = self.bedrock_client.invoke_model(**invoke_args)
+                
+                # Parse and return response
+                try:
+                    response_body = json.loads(response['body'].read().decode())
+                    return response_body['content'][0]['text']
+                except KeyError:
+                    # Handle different response formats
+                    if 'body' in response and hasattr(response['body'], 'read'):
+                        content = response['body'].read().decode()
+                        return f"Claude response in unexpected format. Raw response: {content}"
+                    else:
+                        return f"Error parsing Claude response: {response}"
+                
+            except Exception as invoke_error:
+                # If standard method fails, try our custom method
+                print(f"Standard boto3 invoke failed: {str(invoke_error)}")
+                print("Attempting custom direct API call...")
+                
+                # Try the custom direct API method
+                return self.custom_bedrock_invoke(prompt)
             
         except Exception as e:
-            return f"Error analyzing logs with Claude: {str(e)}"
+            error_msg = f"Error analyzing logs with Claude: {str(e)}"
+            print(error_msg)
+            print("Check if your AWS credentials are properly configured and have Bedrock access.")
+            
+            # Print helpful debugging information
+            print("\nDebugging information:")
+            print(f"AWS_REGION: {os.environ.get('AWS_REGION', 'Not set')}")
+            print(f"AWS_BEDROCK_INFERENCE_PROFILE: {os.environ.get('AWS_BEDROCK_INFERENCE_PROFILE', 'Not set')}")
+            print(f"AWS_ACCESS_KEY_ID: {'Set' if os.environ.get('AWS_ACCESS_KEY_ID') else 'Not set'}")
+            print(f"AWS_SECRET_ACCESS_KEY: {'Set' if os.environ.get('AWS_SECRET_ACCESS_KEY') else 'Not set'}")
+            print(f"AWS_SESSION_TOKEN: {'Set' if os.environ.get('AWS_SESSION_TOKEN') else 'Not set'}")
+            
+            # Check the boto3 version
+            print(f"boto3 version: {boto3.__version__}")
+            
+            # Try a direct invocation with minimal parameters as a final fallback
+            try:
+                print("\nAttempting fallback invocation with minimal parameters...")
+                
+                # Create a fresh client
+                simple_client = boto3.client('bedrock-runtime', region_name=self.region)
+                
+                # Try different model IDs for fallback
+                fallback_models = [
+                    "anthropic.claude-3-sonnet-20240229-v1:0",
+                    "anthropic.claude-3-haiku-20240307-v1:0",
+                    "anthropic.claude-v2:1",
+                    "anthropic.claude-v2",
+                    "anthropic.claude-instant-v1"
+                ]
+                
+                print(f"Trying fallback models...")
+                response = None
+                
+                for model in fallback_models:
+                    try:
+                        print(f"Attempting with model: {model}")
+                        response = simple_client.invoke_model(
+                            modelId=model,
+                            body=json.dumps({
+                                "anthropic_version": "bedrock-2023-05-31",
+                                "max_tokens": 1000,
+                                "messages": [{"role": "user", "content": "Summarize these logs briefly: " + json.dumps(logs[:5])}]
+                            }),
+                            contentType="application/json",
+                            accept="application/json",
+                        )
+                        if response:
+                            print(f"✓ Successful with model: {model}")
+                            # Save the working model for future use
+                            self.model_id = model
+                            break
+                    except Exception as me:
+                        print(f"✗ Failed with model {model}: {str(me)}")
+                
+                if not response:
+                    raise Exception("All fallback models failed")
+                
+                response_body = json.loads(response['body'].read().decode())
+                print("Fallback successful! You can use this approach for your analysis.")
+                return "ERROR WITH FULL ANALYSIS, BUT FALLBACK TEST WORKED. Please update the code based on debugging information and try again."
+                
+            except Exception as fallback_error:
+                print(f"Fallback attempt also failed: {str(fallback_error)}")
+            
+            return error_msg
 
     def process_and_summarize_logs(self, 
                                   app_name: str, 
@@ -564,13 +844,21 @@ class LogExplorer:
         
         # Optionally save to file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"log_analysis_{app_name}_{timestamp}.txt"
+        log_dir = "log_analysis"
+        
+        # Create log_analysis directory if it doesn't exist
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+            print(f"Created directory: {log_dir}")
+            
+        filename = os.path.join(log_dir, f"{app_name}_{timestamp}.md")
         
         with open(filename, "w") as f:
             f.write(f"Log Analysis for {app_name} ({time_range}) - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             f.write(analysis)
             
         print(f"Analysis saved to {filename}")
+        print(f"All log analyses are stored in the '{log_dir}/' directory")
 
 
 def main():
@@ -585,10 +873,10 @@ def main():
                         help="Filter by log level")
     parser.add_argument("--source", "-s", choices=["kubernetes", "prometheus"], default="kubernetes",
                         help="Source for logs (kubernetes or prometheus)")
-    parser.add_argument("--region", "-r", default="eu-west-1", help="AWS region for Bedrock")
-    parser.add_argument("--profile", "-p", 
-                        default="arn:aws:bedrock:eu-west-1:951719175506:inference-profile/eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
-                        help="AWS Bedrock inference profile ARN")
+    parser.add_argument("--region", "-r", default=None, 
+                        help="AWS region for Bedrock (defaults to AWS_REGION env var or eu-west-1)")
+    parser.add_argument("--profile", "-p", default=None, 
+                        help="AWS Bedrock inference profile ARN (defaults to AWS_BEDROCK_INFERENCE_PROFILE env var)")
     parser.add_argument("--no-ssl-verify", action="store_true",
                         help="Disable SSL certificate verification for Kubernetes API calls")
     
